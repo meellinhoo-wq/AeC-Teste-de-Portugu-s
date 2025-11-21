@@ -9,19 +9,21 @@ import TestTimer from '@/components/test/TestTimer';
 import TestStats from '@/components/test/TestStats';
 import ErrorList from '@/components/test/ErrorList';
 import ResultsChart from '@/components/test/ResultsChart';
-import UserDataForm from '@/components/test/UserDataForm';
+
 import { getRandomText } from '@/data/testTexts';
 import { calculateWPM, calculateAccuracy, detectErrors, getErrorSummary, compareTexts } from '@/lib/textAnalysis';
-import { sendResultsToSharePoint, TestResult as SharePointResult } from '@/lib/powerAutomate';
+import { calculateWPM, calculateAccuracy, detectErrors, getErrorSummary, compareTexts } from '@/lib/textAnalysis';
+import { supabase } from '@/lib/supabase';
 
-type TestMode = 'registration' | 'selection' | 'instructions' | 'testing' | 'results';
+type TestMode = 'selection' | 'instructions' | 'testing' | 'results';
 type TestType = 'texto' | 'audio';
 type TestDifficulty = 'facil' | 'medio' | 'dificil';
 
 interface UserData {
   nome: string;
   email: string;
-  matricula: string;
+  matricula?: string;
+  cpf?: string;
 }
 
 interface TestResult {
@@ -60,7 +62,7 @@ const TypingTest = () => {
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [testMode, setTestMode] = useState<TestMode>('registration');
+  const [testMode, setTestMode] = useState<TestMode>('selection');
   const [userData, setUserData] = useState<UserData | null>(null);
   const [testTypeChoice, setTestTypeChoice] = useState<TestType | null>(null);
   const [currentTestIndex, setCurrentTestIndex] = useState(0);
@@ -114,12 +116,28 @@ const TypingTest = () => {
     }
   }, [userInput, timeElapsed, isRunning, textToType]);
 
-  const handleUserDataSubmit = async (data: UserData) => {
-    setUserData(data);
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
 
-    setTestMode('selection');
-    toast.success('Cadastro realizado! Escolha o tipo de teste.');
-  };
+        if (profile) {
+          setUserData({
+            nome: user.user_metadata?.full_name || profile.full_name || user.email?.split('@')[0] || 'Usuário',
+            email: user.email || '',
+            matricula: user.user_metadata?.matricula || profile.matricula || '',
+            cpf: user.user_metadata?.cpf || '',
+          });
+        }
+      }
+    };
+    loadUser();
+  }, []);
 
   const handleStartTest = () => {
     const randomText = getRandomText(difficulty);
@@ -254,27 +272,25 @@ const TypingTest = () => {
     // Envio automático ao final de cada nível
     const loadingToast = toast.loading('Salvando resultados...');
     try {
-      const errorSummary = getErrorSummary(detectedErrors);
-      const sharePointResult: SharePointResult = {
-        nome: userData!.nome,
-        email: userData!.email,
-        matricula: userData!.matricula,
-        tipo_teste: testType,
-        velocidade_wpm: finalWpm,
-        precisao_percentual: finalAccuracy,
-        tempo_total_segundos: timeElapsed,
-        erros_total: detectedErrors.length,
-        erros_detalhados: JSON.stringify(errorSummary),
-        texto_referencia: textToType,
-        texto_digitado: userInput,
-        data_teste: new Date().toISOString(),
-      };
+      const { data: { user } } = await supabase.auth.getUser();
 
-      await sendResultsToSharePoint(sharePointResult);
-      toast.success('Resultado salvo com sucesso!');
+      if (user) {
+        const { error } = await supabase.from('typing_test_results').insert({
+          user_id: user.id,
+          test_type: testType,
+          difficulty: difficulty,
+          wpm: finalWpm,
+          accuracy: finalAccuracy,
+          duration_seconds: timeElapsed,
+          errors_count: detectedErrors.length,
+        });
+
+        if (error) throw error;
+        toast.success('Resultado salvo com sucesso!');
+      }
     } catch (error) {
       console.error('Erro ao salvar:', error);
-      toast.error('Erro ao salvar resultado, mas ele foi registrado localmente.');
+      toast.error('Erro ao salvar resultado.');
     } finally {
       toast.dismiss(loadingToast);
     }
@@ -327,9 +343,9 @@ const TypingTest = () => {
   };
 
   const handleNewTest = () => {
-    setTestMode('registration');
+    setTestMode('selection');
 
-    setUserData(null);
+
     setTestTypeChoice(null);
     setCurrentTestIndex(0);
     setTestResults([]);
@@ -347,41 +363,8 @@ const TypingTest = () => {
   };
 
   const handleSendResults = async () => {
-    if (!userData) {
-      toast.error('Dados do usuário não encontrados');
-      return;
-    }
-
-    const loadingToast = toast.loading('Enviando resultados...');
-
-    // Enviar resultados do último teste (ou todos os testes?)
-    const lastResult = testResults[testResults.length - 1];
-    const errorSummary = getErrorSummary(errors);
-
-    const result: SharePointResult = {
-      nome: userData.nome,
-      email: userData.email,
-      matricula: userData.matricula,
-      tipo_teste: testType,
-      velocidade_wpm: wpm,
-      precisao_percentual: accuracy,
-      tempo_total_segundos: timeElapsed,
-      erros_total: errors.length,
-      erros_detalhados: JSON.stringify(errorSummary),
-      texto_referencia: textToType,
-      texto_digitado: userInput,
-      data_teste: new Date().toISOString(),
-    };
-
-    const response = await sendResultsToSharePoint(result);
-
-    toast.dismiss(loadingToast);
-
-    if (response.success) {
-      toast.success('Resultados enviados com sucesso!');
-    } else {
-      toast.error(response.message);
-    }
+    // Função mantida para compatibilidade, mas o envio agora é automático
+    toast.info('Os resultados já foram salvos automaticamente.');
   };
 
   // Controle de integridade: detectar saída da página
@@ -452,61 +435,7 @@ const TypingTest = () => {
     );
   };
 
-  // TELA DE CADASTRO (primeira tela)
-  if (testMode === 'registration') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-cobalto/5 to-background">
-        <Header />
-        <div className="container mx-auto px-4 py-8 mt-16">
-          <Button
-            variant="outline"
-            onClick={() => navigate('/')}
-            className="mb-6"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Voltar
-          </Button>
 
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-background border border-border rounded-xl p-8 shadow-lg">
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold text-cobalto mb-2">
-                  Cadastro do Participante
-                </h2>
-                <p className="text-foreground/70">
-                  Preencha seus dados para iniciar a sequência de testes
-                </p>
-              </div>
-
-              <UserDataForm
-                onSubmit={handleUserDataSubmit}
-                onCancel={() => navigate('/')}
-              />
-
-              <div className="mt-6 p-4 bg-ceu/10 border border-ceu/20 rounded-lg">
-                <h3 className="font-semibold text-foreground mb-2 text-center">
-                  Sequência de Testes
-                </h3>
-                <p className="text-sm text-foreground/70 text-center mb-3">
-                  Você realizará 6 testes no total (sequência obrigatória):
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2 bg-background rounded">
-                    <FileText className="w-4 h-4 text-cobalto inline mr-1" />
-                    <strong>Texto:</strong> Fácil → Moderado → Difícil
-                  </div>
-                  <div className="p-2 bg-background rounded">
-                    <Headphones className="w-4 h-4 text-ceu inline mr-1" />
-                    <strong>Áudio:</strong> Fácil → Moderado → Difícil
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // TELA DE SELEÇÃO
   if (testMode === 'selection') {
@@ -602,7 +531,7 @@ const TypingTest = () => {
             <div className="mb-6 p-4 bg-cobalto/10 border border-cobalto/20 rounded-lg">
               <div className="text-center">
                 <p className="text-sm text-foreground/80">
-                  <strong>Participante:</strong> {userData.nome} • <strong>Matrícula:</strong> {userData.matricula}
+                  <strong>Participante:</strong> {userData.nome} • <strong>{userData.matricula ? 'Matrícula' : 'CPF'}:</strong> {userData.matricula || userData.cpf}
                 </p>
               </div>
             </div>
@@ -715,7 +644,7 @@ const TypingTest = () => {
               <div className="mb-6 p-4 bg-cobalto/10 border border-cobalto/20 rounded-lg">
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-foreground/80">
-                    <strong>{userData.nome}</strong> • Matrícula: {userData.matricula}
+                    <strong>{userData.nome}</strong> • {userData.matricula ? `Matrícula: ${userData.matricula}` : `CPF: ${userData.cpf}`}
                   </p>
                   <p className="text-sm text-foreground/80">
                     Teste {currentTestIndex + 1} de {testSequence.length} • {getTypeLabel(testType)} - {getDifficultyLabel(difficulty)}
@@ -891,8 +820,8 @@ const TypingTest = () => {
                   <p className="font-semibold text-foreground">{userData.email}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-foreground/60 mb-1">Matrícula</p>
-                  <p className="font-semibold text-foreground">{userData.matricula}</p>
+                  <p className="text-sm text-foreground/60 mb-1">{userData.matricula ? 'Matrícula' : 'CPF'}</p>
+                  <p className="font-semibold text-foreground">{userData.matricula || userData.cpf}</p>
                 </div>
               </div>
             </div>

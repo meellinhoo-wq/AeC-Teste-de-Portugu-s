@@ -27,9 +27,9 @@ const Footer = () => {
           {/* Brand */}
           <div>
             <div className="flex items-center mb-4">
-              <img 
-                src={logoAeC} 
-                alt="AeC" 
+              <img
+                src={logoAeC}
+                alt="AeC"
                 className="h-10"
                 style={{ filter: 'brightness(0) invert(1)' }}
               />
@@ -87,7 +87,7 @@ const Footer = () => {
             © {currentYear} AeC. Todos os direitos reservados.
           </p>
           <p className="text-primary-foreground/50 text-xs mt-2 font-myriad">
-            Integrado com Microsoft SharePoint • Power Automate
+            Desenvolvido por Mickael Bandeira | Analista de Conteúdo
           </p>
         </div>
       </div>

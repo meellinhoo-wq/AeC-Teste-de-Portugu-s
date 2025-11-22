@@ -38,7 +38,7 @@ const Footer = () => {
               Teste de Digitação e Português AeC
             </p>
             <p className="text-primary-foreground/60 text-xs font-myriad italic">
-              Desenvolvido por Mickael Bandeira - Analista de Conteúdo
+              Desenvolvido por Mickael Bandeira | Analista de Conteúdo
             </p>
           </div>
 
